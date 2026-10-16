@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#010102">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8f8">
+<title>Shopify批量上架工具</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  /* 令牌：Linear DESIGN.md（awesome-design-md）的深色官方值 + 同构推导的浅色；
+     结构与文案规则：impeccable（Operate 模式：可扫读、一致、品牌体现在细节里） */
+  :root {
+    --bg:#010102; --surface:#0f1011; --surface-2:#141516; --surface-3:#18191a;
+    --fg:#f7f8f8; --fg-2:#d0d6e0; --muted:#8a8f98;
+    --line:#23252a; --line-strong:#34343a;
+    --accent:#5e6ad2; --accent-hover:#828fff; --on-accent:#ffffff; --ring:rgba(94,106,210,.5);
+    --ok:#27a644; --ok-bg:rgba(39,166,68,.14);
+    --bad:#e5645c; --bad-bg:rgba(229,100,92,.14);
+    --warn:#d9a441; --warn-bg:rgba(217,164,65,.14);
+    --font:Inter,"SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --mono:"JetBrains Mono","Geist Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --ease-out:cubic-bezier(0.23, 1, 0.32, 1);
+    color-scheme:dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#f7f8f8; --surface:#ffffff; --surface-2:#f3f4f6; --surface-3:#eceef1;
+      --fg:#0f1011; --fg-2:#33363d; --muted:#62666d;
+      --line:#e3e5e9; --line-strong:#c9ccd2;
+      --accent:#5e6ad2; --accent-hover:#4a55c0; --on-accent:#ffffff; --ring:rgba(94,106,210,.45);
+      --ok:#1d7f35; --ok-bg:rgba(39,166,68,.12);
+      --bad:#b83a32; --bad-bg:rgba(229,100,92,.13);
+      --warn:#8a5a0c; --warn-bg:rgba(217,164,65,.17);
+      color-scheme:light;
+    }
+  }
+
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; -webkit-tap-highlight-color:transparent; scrollbar-color:var(--line-strong) transparent; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 var(--font);
+    -webkit-font-smoothing:antialiased; font-variant-numeric:tabular-nums; caret-color:var(--accent); accent-color:var(--accent); }
+  ::selection { background:rgba(94,106,210,.38); color:inherit; }
+  ::placeholder { color:var(--muted); opacity:1; }
+  a { text-underline-offset:3px; }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 20px 64px; }
+
+  header { padding:36px 0 24px; }
+  h1 { font-size:22px; line-height:1.2; margin:0; font-weight:600; letter-spacing:-.4px; text-wrap:balance; }
+  header p { margin:6px 0 0; color:var(--muted); font-size:13px; max-width:68ch; text-wrap:pretty; }
+
+  /* 分区：用细线分隔，不用卡片（避免卡片套卡片） */
+  .sec { border-top:1px solid var(--line); padding:28px 0; }
+  .sec-head { display:flex; align-items:baseline; gap:10px; margin-bottom:14px; }
+  .step { width:22px; height:22px; border-radius:50%; border:1px solid var(--line-strong); color:var(--fg-2);
+    font-size:12px; font-weight:500; display:grid; place-items:center; flex:none; align-self:center; }
+  .sec.done .step { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+  .sec-head h2 { font-size:16px; margin:0; font-weight:600; letter-spacing:-.2px; }
+  .sec-head .hint { margin-left:auto; color:var(--muted); font-size:12px; }
+
+  .drop { border:1px dashed var(--line-strong); border-radius:12px; background:var(--surface);
+    padding:28px 16px; text-align:center; cursor:pointer; color:var(--muted);
+    transition:border-color 150ms var(--ease-out), background-color 150ms var(--ease-out), transform 160ms var(--ease-out); }
+  .drop.over { border-color:var(--accent); background:var(--surface-2); color:var(--fg-2); }
+  .drop:active { transform:scale(0.995); }
+  .drop:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+  .drop svg { width:26px; height:26px; margin-bottom:6px; }
+  .drop strong { display:block; color:var(--fg); font-weight:500; font-size:14px; }
+  .drop small { font-size:12px; }
+
+  .chip { display:none; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; background:var(--surface); }
+  .chip.show { display:flex; }
+  .chip .ic { color:var(--muted); display:grid; place-items:center; flex:none; }
+  .chip .ic svg { width:20px; height:20px; }
+  .chip .meta { min-width:0; flex:1; }
+  .chip .name { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chip .sub { color:var(--muted); font-size:12px; }
+  .icon-btn { border:0; background:transparent; color:var(--muted); width:32px; height:32px; border-radius:8px;
+    cursor:pointer; display:grid; place-items:center;
+    transition:background-color 120ms var(--ease-out), color 120ms var(--ease-out), transform 160ms var(--ease-out); }
+  .icon-btn svg { width:16px; height:16px; }
+  .icon-btn:active { transform:scale(0.92); }
+
+  .field { display:flex; align-items:center; gap:10px; margin-top:14px; }
+  .field label { color:var(--muted); font-size:13px; }
+  select, input[type=search], textarea { font:inherit; color:var(--fg); background:var(--surface);
+    border:1px solid var(--line); border-radius:8px; }
+  select { padding:8px 30px 8px 12px; }
+  select:disabled { opacity:.5; }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--ring); outline-offset:0; border-color:var(--line-strong); }
+  textarea { width:100%; height:140px; padding:10px 12px; resize:vertical; font:13px/1.5 var(--mono); }
+  .counter { color:var(--muted); font-size:12px; }
+
+  button { font:inherit; cursor:pointer; }
+  .btn { display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border-radius:8px; font-weight:500; font-size:14px; line-height:1.2;
+    border:1px solid var(--line); background:var(--surface); color:var(--fg);
+    transition:transform 160ms var(--ease-out), background-color 120ms var(--ease-out), border-color 120ms var(--ease-out); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .btn.sm { padding:5px 10px; font-size:13px; }
+  .btn:active:not(:disabled) { transform:scale(0.97); }
+  .btn:focus-visible, .seg button:focus-visible, .icon-btn:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+
+  .runbar { display:flex; align-items:center; gap:12px; padding:20px 0 28px; border-top:1px solid var(--line); }
+  .status { font-size:13px; color:var(--muted); }
+  .status.err { color:var(--bad); }
+  .spinner { width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent);
+    border-radius:50%; animation:sp .7s linear infinite; display:none; }
+  .spinner.on { display:inline-block; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+
+  #result[hidden] { display:none; }
+  #result { padding-top:24px; }
+  .summary { font-size:15px; color:var(--fg-2); margin:0 0 16px; }
+  .summary b { color:var(--fg); font-weight:600; }
+
+  .missing { border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:13px; }
+  .missing[hidden] { display:none; }
+  .missing .top { display:flex; align-items:center; gap:10px; color:var(--bad); font-weight:600; }
+  .missing .top .btn { margin-left:auto; }
+  .missing .list { margin-top:6px; color:var(--fg-2); font:12px/1.6 var(--mono); word-break:break-all; }
+
+  .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--surface); }
+  .seg button { border:0; background:transparent; color:var(--muted); padding:7px 12px; font-size:13px; font-weight:500;
+    transition:color 120ms var(--ease-out), background-color 120ms var(--ease-out), transform 160ms var(--ease-out); }
+  .seg button + button { border-left:1px solid var(--line); }
+  .seg button.on { background:var(--surface-3); color:var(--fg); }
+  .seg button:active { transform:scale(0.97); }
+  .seg .ct { margin-left:4px; color:var(--muted); font-weight:400; }
+  .seg button.on .ct { color:var(--fg-2); }
+  input[type=search] { padding:7px 10px; min-width:200px; }
+  .spacer { flex:1; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+
+  .tablewrap { max-height:480px; overflow:auto; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+  table { border-collapse:separate; border-spacing:0; width:100%; }
+  th, td { padding:9px 14px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { position:sticky; top:0; background:var(--surface-2); color:var(--muted); font-size:12px; font-weight:500; z-index:1; }
+  tbody tr:last-child td { border-bottom:0; }
+  td.num, th.num { text-align:right; }
+  td.sku { font-family:var(--mono); font-size:13px; color:var(--fg-2); }
+  tr.group-start td { border-top:1px solid var(--line-strong); }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:9999px; font-size:12px; font-weight:500; }
+  .badge::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .b-有货 { color:var(--ok); background:var(--ok-bg); }
+  .b-缺货 { color:var(--bad); background:var(--bad-bg); }
+  .b-未建库存 { color:var(--warn); background:var(--warn-bg); }
+  .empty { padding:36px 16px; text-align:center; color:var(--muted); white-space:normal; text-wrap:balance; }
+  .foot { margin-top:8px; color:var(--muted); font-size:12px; }
+
+  /* hover 只给鼠标；触屏用 :active 反馈 */
+  @media (hover: hover) and (pointer: fine) {
+    .btn:hover:not(:disabled) { background:var(--surface-3); border-color:var(--line-strong); }
+    .btn.primary:hover:not(:disabled) { background:var(--accent-hover); border-color:var(--accent-hover); }
+    .drop:hover { border-color:var(--accent); background:var(--surface-2); color:var(--fg-2); }
+    .icon-btn:hover { background:var(--surface-3); color:var(--fg); }
+    .seg button:hover { color:var(--fg); }
+    tbody tr:hover td { background:var(--surface-2); }
+  }
+
+  /* 入场：结果区、文件标签淡入并上移 8px（240ms，ease-out） */
+  #result, .chip.show {
+    transition:opacity 240ms var(--ease-out), transform 240ms var(--ease-out);
+    @starting-style { opacity:0; transform:translateY(8px); }
+  }
+
+  /* 触屏：16px 输入防缩放；去掉点击延迟；控件文字不被长按选中 */
+  button, [role="button"], select { touch-action:manipulation; }
+  button, [role="button"] { user-select:none; -webkit-user-select:none; }
+  @media (pointer: coarse) { input, textarea, select { font-size:16px; } }
+
+  /* 减少动效：去掉位移和缩放，保留透明度和颜色过渡 */
+  @media (prefers-reduced-motion: reduce) {
+    .btn:active:not(:disabled), .icon-btn:active, .seg button:active, .drop:active { transform:none; }
+    #result, .chip.show { transition:opacity 200ms ease; @starting-style { opacity:0; transform:none; } }
+    .spinner { animation-duration:1.6s; }
+  }
+
+  @media (max-width:640px) {
+    .wrap { padding:0 16px 48px; }
+    header { padding-top:24px; }
+    .sec { padding:22px 0; }
+    .sec-head { flex-wrap:wrap; row-gap:2px; }
+    .sec-head .hint { margin-left:32px; width:100%; }
+    input[type=search] { min-width:0; flex:1; }
+    .spacer { display:none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Shopify批量上架工具</h1>
+    <p>导入 Shopify 的库存导出文件，输入要上架的 SKC，查看每个 SKC 下各 SKU 的库存，并生成只含有货 SKU 的上架表。数据只在本机浏览器里处理，不会上传。</p>
+  </header>
+
+  <section class="sec" id="card1">
+    <div class="sec-head"><span class="step">1</span><h2>导入库存导出文件</h2><span class="hint">Shopify 后台：库存 → 导出（.zip 或 .csv）</span></div>
+    <div class="drop" id="drop1" tabindex="0" role="button" aria-label="选择或拖入库存导出文件">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
+      <strong>选择文件，或拖到这里</strong>
+      <small>zip 不用解压，直接放进来</small>
+    </div>
+    <input type="file" id="in1" accept=".zip,.csv" hidden>
+    <div class="chip" id="chip1">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/></svg></div>
+      <div class="meta"><div class="name" id="chipName"></div><div class="sub" id="chipSub"></div></div>
+      <button class="icon-btn" id="chipX" title="移除文件" aria-label="移除文件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="field">
+      <label for="loc">统计哪个仓库的库存</label>
+      <select id="loc" disabled><option>先导入文件</option></select>
+    </div>
+  </section>
+
+  <section class="sec" id="card2">
+    <div class="sec-head"><span class="step">2</span><h2>填写 SKC 清单</h2><span class="hint" id="hint2">不填就列出该仓库的全部 SKC</span></div>
+    <textarea id="skcs" placeholder="每行一个 SKC，例如：&#10;IML260623MGYWAP-C00003&#10;IML260623MGYWAP-C00004" spellcheck="false" aria-label="SKC 清单"></textarea>
+    <div class="field" style="margin-top:10px">
+      <button class="btn sm" id="btnList">从 Excel 或 CSV 导入清单</button>
+      <input type="file" id="in2" accept=".xlsx,.xls,.csv,.txt" hidden>
+      <span class="counter" id="counter">已输入 0 个</span>
+    </div>
+  </section>
+
+  <div class="runbar">
+    <button class="btn primary" id="run" disabled>生成 SKU 库存表</button>
+    <span class="spinner" id="spin"></span>
+    <span class="status" id="msg" role="status">请先导入库存导出文件</span>
+  </div>
+
+  <section id="result" hidden>
+    <p class="summary" id="summary"></p>
+    <div class="missing" id="missing" hidden>
+      <div class="top"><span id="missingTitle"></span><button class="btn sm" id="copyMissing">复制这些 SKC</button></div>
+      <div class="list" id="missingList"></div>
+    </div>
+    <div class="toolbar">
+      <div class="seg" id="seg" role="group" aria-label="按库存状态筛选">
+        <button data-f="" class="on">全部<span class="ct" id="ct0">0</span></button><button data-f="有货">有货<span class="ct" id="ct1">0</span></button><button data-f="缺货">缺货<span class="ct" id="ct2">0</span></button><button data-f="未建库存">未建库存<span class="ct" id="ct3">0</span></button>
+      </div>
+      <input type="search" id="q" placeholder="搜索 SKC、SKU 或尺码" aria-label="搜索">
+      <span class="spacer"></span>
+      <div class="actions">
+        <button class="btn" id="dl" disabled>下载库存明细</button>
+        <button class="btn primary" id="dl2" disabled>下载上架表（仅有货）</button>
+      </div>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>SKC</th><th>SKU</th><th>颜色</th><th>尺码</th><th class="num">可用</th><th>状态</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+    <div class="foot" id="foot"></div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let rows = [];      // 解析后的导出数据
+let out = [];       // 结果
+let fileName = '';
+
+/* ---------- CSV 解析（支持引号、换行） ---------- */
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const res = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i+1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n') { row.push(f); res.push(row); row = []; f = ''; }
+    else if (c !== '\r') f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); res.push(row); }
+  return res;
+}
+
+function toObjects(table) {
+  const head = table[0].map(h => h.trim());
+  return table.slice(1).filter(r => r.length > 1).map(r => {
+    const o = {}; head.forEach((h, i) => o[h] = (r[i] ?? '').trim()); return o;
+  });
+}
+
+/* ---------- 读取文件 ---------- */
+async function readExport(file) {
+  let text;
+  if (file.name.toLowerCase().endsWith('.zip')) {
+    const zip = await JSZip.loadAsync(file);
+    const entry = Object.values(zip.files).find(f => !f.dir && f.name.toLowerCase().endsWith('.csv'));
+    if (!entry) throw new Error('这个 zip 里没有 CSV 文件。请在 Shopify 后台“库存”页重新导出，再放进来。');
+    text = await entry.async('string');
+  } else text = await file.text();
+  const data = toObjects(parseCSV(text));
+  if (!data.length || !('SKU' in data[0]) || !('Location' in data[0]))
+    throw new Error('这不是 Shopify 的库存导出文件（缺少 SKU 或 Location 列）。请在后台“库存”页点“导出”，选择全部库存后重新导出。');
+  return data;
+}
+
+const availKey = o => Object.keys(o).find(k => /^Available/i.test(k));
+
+function optionValue(o, re, fallbackN) {
+  for (const n of [1,2,3]) if (re.test(o[`Option${n} Name`] || '')) return o[`Option${n} Value`] || '';
+  return o[`Option${fallbackN} Value`] || '';
+}
+
+const skcOf = sku => sku.replace(/-S\d+$/i, '');
+
+/* ---------- 界面辅助 ---------- */
+function setMsg(text, isErr) { $('msg').textContent = text || ''; $('msg').className = 'status' + (isErr ? ' err' : ''); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function wantList() { return [...new Set($('skcs').value.split(/[\r\n,;\t ]+/).map(s => s.trim()).filter(Boolean))]; }
+function updateCounter() {
+  const n = wantList().length;
+  $('counter').textContent = n ? `已输入 ${n} 个 SKC` : '已输入 0 个';
+}
+function resetFile() {
+  rows = []; out = []; fileName = '';
+  $('chip1').classList.remove('show'); $('drop1').style.display = '';
+  $('card1').classList.remove('done');
+  $('loc').innerHTML = '<option>先导入文件</option>'; $('loc').disabled = true;
+  $('run').disabled = true; $('result').hidden = true; $('in1').value = ''; setMsg('请先导入库存导出文件');
+}
+
+/* ---------- 导入文件 ---------- */
+async function loadExport(file) {
+  setMsg('正在读取导出文件…'); $('spin').classList.add('on');
+  try {
+    rows = await readExport(file); fileName = file.name;
+    const locs = [...new Set(rows.map(r => r.Location))];
+    $('loc').innerHTML = locs.map(l => `<option>${esc(l)}</option>`).join('');
+    const pref = locs.find(l => l === '3PL US'); if (pref) $('loc').value = pref;
+    $('loc').disabled = false; $('run').disabled = false;
+    $('chipName').textContent = file.name;
+    $('chipSub').textContent = `${rows.length.toLocaleString()} 行 · ${locs.length} 个仓库`;
+    $('chip1').classList.add('show'); $('drop1').style.display = 'none'; $('card1').classList.add('done');
+    setMsg('');
+  } catch (e) { resetFile(); setMsg(e.message, true); }
+  $('spin').classList.remove('on');
+}
+
+const drop = $('drop1');
+drop.onclick = () => $('in1').click();
+drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('in1').click(); } };
+$('in1').onchange = e => e.target.files[0] && loadExport(e.target.files[0]);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && loadExport(e.dataTransfer.files[0]); };
+$('chipX').onclick = resetFile;
+
+$('btnList').onclick = () => $('in2').click();
+$('skcs').oninput = updateCounter;
+$('in2').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    let list;
+    if (/\.(txt)$/i.test(f.name)) list = (await f.text()).split(/\r?\n/);
+    else {
+      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+      list = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }).map(r => r[0]);
+    }
+    list = list.map(s => String(s ?? '').trim()).filter(s => s && !/skc/i.test(s));
+    $('skcs').value = list.join('\n'); updateCounter();
+    $('hint2').textContent = `已从 ${f.name} 导入`;
+  } catch (err) { setMsg('清单读不出来：' + err.message + '。请确认文件没有损坏，且 SKC 在第一列。', true); }
+  e.target.value = '';
+};
+
+/* ---------- 生成 ---------- */
+$('run').onclick = () => {
+  const loc = $('loc').value;
+  const want = [...new Set($('skcs').value.split(/[\r\n,;\t ]+/).map(s => s.trim()).filter(Boolean))];
+  const groups = new Map();
+  for (const r of rows) {
+    if (r.Location !== loc || !r.SKU) continue;
+    const k = skcOf(r.SKU);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  const keys = want.length ? want : [...groups.keys()];
+  out = []; const missing = [];
+  for (const k of keys) {
+    const g = groups.get(k);
+    if (!g) { missing.push(k); continue; }
+    g.sort((a, b) => a.SKU.localeCompare(b.SKU));
+    for (const r of g) {
+      const raw = r[availKey(r)] ?? '';
+      const isNum = /^-?\d+$/.test(raw), n = isNum ? parseInt(raw, 10) : 0;
+      out.push({
+        SKC: k, SKU: r.SKU,
+        颜色: optionValue(r, /colou?r/i, 1), 尺码: optionValue(r, /size/i, 2),
+        可用: n, 状态: !isNum ? '未建库存' : n > 0 ? '有货' : '缺货'
+      });
+    }
+  }
+  render(out, keys.length, missing);
+};
+
+/* ---------- 结果展示 ---------- */
+let filterStatus = '', query = '', lastMissing = [];
+const PREVIEW_MAX = 1500;
+
+function render(data, total, missing) {
+  lastMissing = missing;
+  const skcCount = new Set(data.map(d => d.SKC)).size;
+  const cnt = s => data.filter(d => d.状态 === s).length;
+  const stock = cnt('有货');
+  $('summary').innerHTML = skcCount
+    ? `找到 <b>${skcCount}</b> / ${total} 个 SKC，共 <b>${data.length}</b> 个 SKU，其中 <b>${stock}</b> 个有货。`
+    : `清单里的 ${total} 个 SKC 都没有在“${esc($('loc').value)}”找到。`;
+  $('ct0').textContent = data.length; $('ct1').textContent = stock;
+  $('ct2').textContent = cnt('缺货'); $('ct3').textContent = cnt('未建库存');
+  $('missing').hidden = !missing.length;
+  $('missingTitle').textContent = `${missing.length} 个 SKC 在该仓库没有找到`;
+  $('missingList').textContent = missing.join('、');
+  $('dl').disabled = !data.length;
+  $('dl2').disabled = !stock;
+  setMsg(data.length && !stock ? '这批 SKU 当前都没有可用库存，所以无法生成上架表。' : '');
+  $('result').hidden = false;
+  filterStatus = ''; query = ''; $('q').value = '';
+  document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('on', b.dataset.f === ''));
+  drawTable();
+  $('result').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+}
+
+function drawTable() {
+  const q = query.trim().toLowerCase();
+  const list = out.filter(d => (!filterStatus || d.状态 === filterStatus) &&
+    (!q || (d.SKC + ' ' + d.SKU + ' ' + d.尺码 + ' ' + d.颜色).toLowerCase().includes(q)));
+  if (!list.length) {
+    $('tbody').innerHTML = `<tr><td colspan="6"><div class="empty">${out.length
+      ? '没有符合当前筛选或搜索的 SKU。换个状态，或清空搜索框试试。'
+      : '所选仓库里没有找到清单中的任何 SKC。请确认仓库选对了，以及 SKC 没有拼错。'}</div></td></tr>`;
+    $('foot').textContent = ''; return;
+  }
+  let prev = null;
+  $('tbody').innerHTML = list.slice(0, PREVIEW_MAX).map(d => {
+    const start = d.SKC !== prev && prev !== null; prev = d.SKC;
+    return `<tr class="${start ? 'group-start' : ''}"><td class="sku">${esc(d.SKC)}</td><td class="sku">${esc(d.SKU)}</td>` +
+      `<td>${esc(d.颜色)}</td><td>${esc(d.尺码)}</td><td class="num">${d.可用}</td>` +
+      `<td><span class="badge b-${d.状态}">${d.状态}</span></td></tr>`;
+  }).join('');
+  $('foot').textContent = `显示 ${Math.min(list.length, PREVIEW_MAX).toLocaleString()} / ${list.length.toLocaleString()} 行` +
+    (list.length > PREVIEW_MAX ? '；页面只预览前 1500 行，下载的 Excel 是完整的。' : '');
+}
+
+document.querySelectorAll('#seg button').forEach(b => b.onclick = () => {
+  filterStatus = b.dataset.f;
+  document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('on', x === b));
+  drawTable();
+});
+$('q').oninput = e => { query = e.target.value; drawTable(); };
+$('copyMissing').onclick = async () => {
+  const label = '复制这些 SKC';
+  try { await navigator.clipboard.writeText(lastMissing.join('\n')); $('copyMissing').textContent = '已复制'; }
+  catch { $('copyMissing').textContent = '没复制成功，请手动选中复制'; }
+  setTimeout(() => $('copyMissing').textContent = label, 1800);
+};
+
+/* ---------- 下载 ---------- */
+$('dl2').onclick = () => {
+  const list = out.filter(d => d.状态 === '有货').map(d => ({ SKU: d.SKU, 上架状态: 'active' }));
+  const ws = XLSX.utils.json_to_sheet(list, { header: ['SKU', '上架状态'] });
+  ws['!cols'] = [{wch:30},{wch:12}];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  XLSX.writeFile(wb, 'SKU上架表.xlsx');
+};
+
+$('dl').onclick = () => {
+  const ws = XLSX.utils.json_to_sheet(out, { header: ['SKC','SKU','颜色','尺码','可用','状态'] });
+  ws['!cols'] = [{wch:26},{wch:30},{wch:14},{wch:8},{wch:8},{wch:10}];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'SKU库存明细');
+  XLSX.writeFile(wb, 'SKU库存明细.xlsx');
+};
+</script>
+</body>
+</html>
